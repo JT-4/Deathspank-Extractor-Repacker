@@ -3,10 +3,31 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:Deathspank_Extractor_Repacker"
+        xmlns:local="clr-namespace:Deathspank_Extractor_Repacker" xmlns:viewmodels="clr-namespace:Deathspank_Extractor_Repacker.ViewModels" d:DataContext="{d:DesignInstance Type=viewmodels:MainWindow_ViewModel}"
         mc:Ignorable="d"
         Title="MainWindow" Height="450" Width="800">
     <Grid>
-        
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <DataGrid d:ItemsSource="{d:SampleData ItemCount=10}" 
+                  ItemsSource="{Binding Files}" Grid.Row="1" 
+                  VerticalScrollBarVisibility="Auto" AutoGenerateColumns="False" 
+                  AlternatingRowBackground="LightGray" 
+                  SelectedItem="{Binding SelectedFileInfo, Mode=TwoWay}">
+            
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="ID" Binding="{Binding Id}"/>
+                <DataGridTextColumn Header="Filename" Binding="{Binding FileName}"/>
+                <DataGridTextColumn Header="ItemID" Binding="{Binding ItemID}"/>
+                <DataGridTextColumn Header="FileExt" Binding="{Binding FileExt}"/>
+                <DataGridTextColumn Header="FileOffset" Binding="{Binding FileOffset}"/>
+                <DataGridTextColumn Header="UncompressedSize" Binding="{Binding UncompressedSize}"/>
+                <DataGridTextColumn Header="CompressedSize" Binding="{Binding CompressedSize}" Width="*"/>
+            </DataGrid.Columns>
+
+        </DataGrid>
+
     </Grid>
 </Window>
