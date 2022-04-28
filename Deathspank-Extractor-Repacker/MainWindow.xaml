@@ -11,6 +11,7 @@
             <RowDefinition Height="50"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
+        <Button Content="export selected file" Command="{Binding Export_SingleFile_Command}"></Button>
         <DataGrid d:ItemsSource="{d:SampleData ItemCount=10}" 
                   ItemsSource="{Binding Files}" Grid.Row="1" 
                   VerticalScrollBarVisibility="Auto" AutoGenerateColumns="False" 
@@ -19,9 +20,12 @@
             
             <DataGrid.Columns>
                 <DataGridTextColumn Header="ID" Binding="{Binding Id}"/>
+                <DataGridTextColumn Header="FilePath" Binding="{Binding FilePath}"/>
                 <DataGridTextColumn Header="Filename" Binding="{Binding FileName}"/>
                 <DataGridTextColumn Header="ItemID" Binding="{Binding ItemID}"/>
-                <DataGridTextColumn Header="FileExt" Binding="{Binding FileExt}"/>
+                <DataGridTextColumn Header="attr4" Binding="{Binding Attribute4}"/>
+                <DataGridTextColumn Header="FileType" Binding="{Binding Attribute5}"/>
+                <DataGridTextColumn Header="IsCompressed" Binding="{Binding IsCompressed}"/>
                 <DataGridTextColumn Header="FileOffset" Binding="{Binding FileOffset}"/>
                 <DataGridTextColumn Header="UncompressedSize" Binding="{Binding UncompressedSize}"/>
                 <DataGridTextColumn Header="CompressedSize" Binding="{Binding CompressedSize}" Width="*"/>
