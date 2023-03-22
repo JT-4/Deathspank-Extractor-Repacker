@@ -25,5 +25,7 @@ namespace Deathspank_Extractor_Repacker
             this.DataContext = new ViewModels.MainWindow_ViewModel();
             InitializeComponent();
         }
+
+        
     }
 }
