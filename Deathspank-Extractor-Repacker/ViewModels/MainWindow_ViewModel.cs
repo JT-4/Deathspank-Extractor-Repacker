@@ -1,6 +1,4 @@
-﻿
-using ComponentAce.Compression.Libs.zlib;
-using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
+﻿using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
 using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
@@ -14,8 +12,9 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Input;
-
-
+using System.Windows.Threading;
+using zlib;
+using Application = System.Windows.Application;
 
 namespace Deathspank_Extractor_Repacker.ViewModels
 {
@@ -34,19 +33,29 @@ namespace Deathspank_Extractor_Repacker.ViewModels
         private string repackfiledirectory;
         //private backing for CurrentOpenFileFullName to impliment onpropertychanged
         private string currentopenfilefullname;
-        //private backing for SelectedGame to impliment onpropertychanged
-        private Models.DSListboxItem selectedgame;
         //private backing for TasksCompleted to impliment onpropertychanged
         private int taskscompleted;
         //private backing for PercentComplete to impliment onpropertychanged
         private decimal percentcomplete;
         //private backing for ProgressText to impliment onpropertychanged
         private string progresstext;
-
-
+        //private backing for OperationText to impliment onpropertychanged
+        private string operationtext;
         #endregion
 
         #region Public members
+        /// <summary>
+        /// The filestream block of data must align to an 8 byte value. This parameter
+        /// denotes the number of 0s between the file name/attribute block of data and the
+        /// file streams. Set each time a file header is read
+        /// </summary>
+        public int FileStreamBegin_BufferSize { get; set; }
+
+        /// <summary>
+        /// Each game in the series has a .gg file hash at the beginning of the file. 
+        /// DS1 files are 800 bytes and DS2/3 are 960 bytes 
+        /// </summary>
+        public int HashLength { get; set; }
 
         /// <summary>
         /// Save a string representing the full filepath of the currently opened
@@ -65,16 +74,38 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     currentopenfilefullname = value;
                     SetOpenFileName(value);
                     OnPropertyChanged("CurrentOpenFileName");
+                    OnPropertyChanged("CurrentOpenFileFullName");
 
                 }
             } 
         }
 
+        /// <summary>
+        /// A string describing the currently performed operation
+        /// gets displayed next to progress bar
+        /// </summary>
+        public string OperationText
+        {
+            get
+            {
+                return operationtext;
+            }
+            set
+            {
+                if (value != operationtext)
+                {
+                    operationtext = value;
+                    OnPropertyChanged("OperationText");
+
+                }
+            }
+        }
 
         /// <summary>
         /// A string holding the file path where a .gg archive will be extracted
         /// </summary>
         public string ArchiveExportPath { get; set; }
+
 
         public string RepackArchive { get; set; }
         /// <summary>
@@ -164,7 +195,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
         }
 
         public ICommand Export_SingleFile_Command { get; set; }
-        public ICommand OpenFile_Command { get; set; }
+        public ICommand OpenFile_Command_DS1 { get; set; }
+        public ICommand OpenFile_Command_DS2_3 { get; set; }
         public ICommand Export_AllFiles_Command { get; set; }
 
         public byte[] FileID { get; set;}
@@ -185,21 +217,6 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     OnPropertyChanged("NumArchiveFiles");
 
                 }
-            }
-        }
-        public Models.DSListboxItem SelectedGame 
-        {
-            get 
-            {
-                return selectedgame;
-            } set 
-            {
-                if (value != selectedgame)
-                {
-                    selectedgame = value;
-                    OnPropertyChanged("SelectedGame");
-                }
-            
             }
         }
 
@@ -241,20 +258,16 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
         public RelayCommand Import_Files_Command { get; set; }
 
-        public ObservableCollection<Models.DSListboxItem> GameSelector { get; set; }
-        
 
         #endregion
 
         #region Constructor
         public MainWindow_ViewModel()
         {
-            GameSelector = new ObservableCollection<Models.DSListboxItem>();
-            PopulateListbox();
-            SelectedGame = GameSelector[2];
-
+            currentopenfilefullname = "No open file";
             this.Export_SingleFile_Command = new RelayCommand(Export_SingleFile_Execute);
-            this.OpenFile_Command = new RelayCommand(OpenFile_Execute);
+            this.OpenFile_Command_DS1 = new RelayCommand(OpenFile_Execute_DS1);
+            this.OpenFile_Command_DS2_3 = new RelayCommand(OpenFile_Execute_DS2_3);
             this.Export_AllFiles_Command = new RelayCommand(Export_AllFiles_Execute);
             this.Import_Files_Command = new RelayCommand(Import_Files_Execute);
             System.IO.Directory.CreateDirectory(@"C:\programdata\DSExtRepkr");
@@ -269,13 +282,23 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
         #endregion
 
-        #region Public Methods
+        #region Public/Private Methods
 
         private void OnHeaderBytesChanged()
         {
             FileID = HeaderBytes.Take(8).Skip(0).ToArray();
             FileNameDataLength = BitConverter.ToInt32(HeaderBytes.Skip(8).Take(4).ToArray(), 0);
             NumArchiveFiles = BitConverter.ToInt32(HeaderBytes.Skip(12).Take(4).ToArray(), 0);
+
+            //start of file data streams must align to 8 byte chunk
+            int calculate_modulus = (16 + HashLength + FileNameDataLength + (36 * NumArchiveFiles)) % 8;
+            if (!(calculate_modulus == 0))
+            {
+                FileStreamBegin_BufferSize = 8 - calculate_modulus;
+            }
+            else {
+                FileStreamBegin_BufferSize = 0;
+            }
         }
 
 
@@ -284,31 +307,21 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             PercentComplete = ((decimal)TasksCompleted / (decimal)TasksToComplete) * 100;
         }
 
-
-        private void PopulateListbox()
-        {
-            GameSelector.Add(new Models.DSListboxItem() { GameName = "Deathspank 1", HashLength = 800 });
-            GameSelector.Add(new Models.DSListboxItem() { GameName = "Deathspank 2", HashLength = 900 });
-            GameSelector.Add(new Models.DSListboxItem() { GameName = "Deathspank 3", HashLength = 900 });
-        }
-
-
         private void SetOpenFileName(string fn)
         {
             CurrentOpenFileName = fn.Substring(fn.LastIndexOf(@"\") + 1, fn.Length - fn.LastIndexOf(@"\") - 1);
         }
 
 
-        private void Import_Files_Execute()
+        private async void Import_Files_Execute()
         {
-
+            
             //store the directory containing the injection files in variable fbd
             var fbd = new FolderBrowserDialog();
             fbd.Description = "Select the folder containing inject Files";
             if (!(fbd.ShowDialog() == DialogResult.OK))
             {
-
-                throw new NotImplementedException();
+                    return;
             }
             //set the directory where the repack files are located
             RepackFileDirectory = fbd.SelectedPath;
@@ -318,16 +331,15 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             exportfbd.Description = "Select the location to create a new .gg archive";
             if (!(exportfbd.ShowDialog() == DialogResult.OK))
             {
-
-                throw new NotImplementedException();
+                    return;
             }
-            
-            //set the directory where the repack files are located
-            ArchiveExportPath = exportfbd.SelectedPath;
+            await Task.Run(() => {
+                //set the directory where the repack files are located
+                ArchiveExportPath = exportfbd.SelectedPath;
 
             //define the length of data that should never change. This data will simply be copied to the new archive
             //int bytelimit = 16 + SelectedGame.HashLength + FileNameDataLength;
-            int bytelimit = 16 + 800 + FileNameDataLength;
+            int bytelimit = 16 + HashLength + FileNameDataLength;
             //write the new bytes that will never change into the new archive
             WriteUnchangedGGBytes($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", 4096, bytelimit);
 
@@ -336,44 +348,55 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             Models.InjectFileData[] importfiles = GetImportFiles(fbd);
 
             //combine file append stream file and delete 
-            int streamlength = 4;
-
+            int streamlength = FileStreamBegin_BufferSize;
+            //int mismatchsize = 0;
             //foreach (Models.DS1_FileInfo dsfile in Files)
             //{
+            PercentComplete = 0;
             for(int i = 0; i < Files.Count; i++)
             {
                 Models.DS1_FileInfo dsfile = Files[i];
-
+                /* used for testing file size of problematic compression. Fixed with external dll
                 if (dsfile.Id == 363)
                 {
                      int test = 1;
                 }
-
+                */
                 //check if the currently archive file is contained this list of files being imported
                 if (importfiles.Any(j => j.FileName == dsfile.FullFilePathName))
                 {
                     
                     //get the importing file that matches the current dsfile
                     var importfilepath = importfiles.Where(k => k.FileName == dsfile.FullFilePathName).FirstOrDefault();
-                    
 
-                    List<byte> encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath));
+
+                    //List<byte> encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath));
                     //zeropad the filestream
-
-
+                    byte[] encryptedfilebytes;
                     byte[] compressedbytes;
 
                     //check if the currently importing file should be compressed to match the file in the archive it is replaceing
                     if (!(dsfile.IsCompressed == 1))
                     {
                         //compress the filestream data for the currently importing file
-                        compressedbytes = encryptedfilebytes.ToArray();
+                        var compressor = new wrapper.Compression();
+                        encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
+                        compressedbytes = encryptedfilebytes;
                     }
                     else
                     {
                         //compress the filestream data for the currently importing file
-                        compressedbytes = CompressFile(encryptedfilebytes.ToArray());
+                        //compressedbytes = CompressFile(encryptedfilebytes.ToArray());
+                        var compressor = new wrapper.Compression();
+                        encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
+                        compressedbytes = compressor.Compress(encryptedfilebytes.ToArray());
                     }
+                    /*
+                    if (compressedbytes.Length != dsfile.CompressedSize)
+                    {
+                        mismatchsize++;
+                    }
+                    */
                         //get the number of zeros needed to be placed onto the end of the file stream. 
                         //All streams should appear in blocks of 64 bytes.
                         int paddingzeros = GetZerosPaddingStream(compressedbytes.Length);
@@ -414,10 +437,10 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                             bw.Write(dsfile.Attr3_ItemID);
                             bw.Write(dsfile.Attr4);
                             bw.Write(dsfile.Attr5);
-                            bw.Write(BitConverter.GetBytes(encryptedfilebytes.Count));
+                            bw.Write(BitConverter.GetBytes(encryptedfilebytes.Length));
                             bw.Write(BitConverter.GetBytes(compressedbytes.Length));
                             bw.Write(dsfile.Attr8_IsCompressed);
-                            bw.Write(BitConverter.GetBytes(16 + 800 + FileNameDataLength + (36 * Files.Count) + streamlength));
+                            bw.Write(BitConverter.GetBytes(16 + HashLength + FileNameDataLength + (36 * Files.Count) + streamlength));
                             bw.Flush();
                             bw.Close();
                         }
@@ -454,7 +477,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                         bw.Write(dsfile.Attr6_UncompressedSize);
                         bw.Write(dsfile.Attr7_CompressedSize);
                         bw.Write(dsfile.Attr8_IsCompressed);
-                        bw.Write(BitConverter.GetBytes(16 + 800 + FileNameDataLength + (36 * Files.Count) + streamlength));
+                        bw.Write(BitConverter.GetBytes(16 + HashLength + FileNameDataLength + (36 * Files.Count) + streamlength));
                         //bw.Write(dsfile.Attr9_FileOffset);
                         bw.Flush();
                         bw.Close();
@@ -463,15 +486,24 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
 
 
-
-                    streamlength += BitConverter.ToInt32(dsfile.Attr7_CompressedSize,0);
+                    //advance the slream length counter by the stream length plus the length of the zeros padding the stream
+                    streamlength += (BitConverter.ToInt32(dsfile.Attr7_CompressedSize,0) +  
+                                    GetZerosPaddingStream(BitConverter.ToInt32(dsfile.Attr7_CompressedSize, 0)));
                 }
 
 
-
+                percentcomplete = (decimal)i / Files.Count;
             }
-            //pad the file with 4 zeros at the end of the file attribute lookup table
-            PadFIleWithZeros($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", 4);
+            //pad the file with "0" bytes to get the total length to be a multiple of 8
+            //before the start of the data streams
+            FileInfo fileInfo = new FileInfo($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg");
+            long size = fileInfo.Length;
+            int remainder = (int)(size % 8);
+            if (!(remainder == 0))
+            {
+                int zeros = 8 - remainder;
+                PadFIleWithZeros($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", zeros);
+            }
 
             //write the filestream temporary file to the end of the new archive file
             AppendFileWithFilestream(@"C:\programdata\DSExtRepkr\Streams.file", $"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg");
@@ -481,6 +513,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             {
                 File.Delete(@"C:\programdata\DSExtRepkr\Streams.file");
             }
+            PercentComplete = 0;
+            });
 
         }
 
@@ -520,29 +554,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             using (FileStream writeStream = File.OpenWrite(outputfile))
             using (BinaryReader br = new BinaryReader(fs))
             {
-                /*
-                BinaryReader reader = new BinaryReader(fs);
-                BinaryWriter writer = new BinaryWriter(writeStream);
-
-                fs.Seek(startingoffset, SeekOrigin.Begin);
-                writeStream.Seek(0, SeekOrigin.End);
-                byte[] buffer = new byte[defaultbuffer];
-                int bytesRead;
-
-                // while the read method returns bytes
-                // keep writing them to the output stream
-                // stop writing when you get to the beginning of the attribute table for files
-                while ((bytesRead = fs.Read(buffer, 0, defaultbuffer)) > 0 && (fs.Position - startingoffset) <= bytelimit)
-                {
-                    writeStream.Write(buffer, 0, bytesRead);
-                }
-                if (writeStream.Length < bytelimit)
-                {
-                    //purge write buffer to get up to total required number of bytes
-                    writeStream.Write(buffer, 0, (int)(bytelimit - writeStream.Length));
-
-                }
-                */
+                
                 br.BaseStream.Position = startingoffset;
                 byte[] writebytes = br.ReadBytes(bytelimit);
                 writeStream.Seek(0, SeekOrigin.End);
@@ -673,63 +685,21 @@ namespace Deathspank_Extractor_Repacker.ViewModels
         public void ExportSingleFile(Models.DS1_FileInfo file)
         {
 
-            //working but memory inefficiant because it reads whole files at a time. 
-            //byte[] decompressed;
+            byte[] decompressed = GetFileStreamFromGGArchive(   CurrentOpenFileFullName, 
+                                                                file.CompressedSize, 
+                                                                file.FileOffset, 
+                                                                file.IsCompressed, 
+                                                                4096);
 
-            byte[] decompressed = GetFileStreamFromGGArchive(CurrentOpenFileFullName, file.CompressedSize, file.FileOffset, file.IsCompressed, 20480);
-
-            /*
-            using (FileStream fs = File.Open(CurrentOpenFileFullName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            {
-                //read offset start to end of file stream 
-                //end = (0 - uncompressed, 1-compressed)
-                //pass byte array to uncompress/filewrite method
-                byte[] streambuffer = new byte[file.CompressedSize];
-                fs.Seek(file.FileOffset, SeekOrigin.Begin);
-                fs.Read(streambuffer, 0, streambuffer.Length);
-
-                if (file.IsCompressed == 1)
-                {
-                    decompressed = DecompressFile(streambuffer);
-                }
-                else
-                {
-                    decompressed = streambuffer;
-                }
-
-            }
-            */
-
-            var decrypted = DecryptFile(decompressed);
-
-
+            byte[] decrypted = DecryptFile(decompressed);
 
             //must be an error here
             //Make sure the export directory exists
             Directory.CreateDirectory($@"{ExportFilePath}\{file.WinFilePath}");
 
-            //error is here extracting too many bytes
-            /*
-            using (MemoryStream ms = new MemoryStream(decrypted))
-            using (FileStream fs = new FileStream($@"{ExportFilePath}\{file.WinFilePath}{file.FileName}", FileMode.OpenOrCreate, FileAccess.ReadWrite))
-            {
-                byte[] buffer = new byte[1024];
-                int bytesRead;
-                //create a binary writer to write to the filestream
-                BinaryWriter bw = new BinaryWriter(fs);
-                while ((bytesRead = ms.Read(buffer, 0, 1024)) > 0 && fs.Position <= decrypted.Length)
-                {
-                    bw.Write(buffer);
-                }
-
-                bw.Flush();
-                bw.Close();
-            }
-            */
             
             using (FileStream fs = new FileStream($@"{ExportFilePath}\{file.WinFilePath}{file.FileName}", FileMode.OpenOrCreate, FileAccess.ReadWrite)) 
             {
-
                 BinaryWriter bw = new BinaryWriter(fs);
                 bw.Write(decrypted);
                 bw.Flush();
@@ -737,8 +707,6 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
             }
             
-
-
         }
 
         private byte[] GetFileStreamFromGGArchive(string currentOpenFileFullName, int compressedSize, int offset, int iscompressed, int buffersize)
@@ -776,7 +744,46 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             return new byte[0];
         }
 
-        private void OpenFile_Execute()
+        private async void OpenFile_Execute_DS1()
+        {
+
+            //create a new open file dialog and filter it to only show datadict files
+            Microsoft.Win32.OpenFileDialog openFileDialog = new Microsoft.Win32.OpenFileDialog();
+            //openFileDialog.Filter = "DeathSpank Data Files (*.datadict)|*.datadict|DeathSpank TextDict Files(*.textdict)|*.textdict|All files (*.*)|*.*";
+            openFileDialog.Filter = "DeathSpank Data Files (*.GG)|*.GG|All files (*.*)|*.*";
+
+            if (openFileDialog.ShowDialog() == true)
+            {
+                //byte[] PreOpenFormatCheck = File.ReadAllBytes(openFileDialog.FileName);
+                //bool IsDeathspankDictFormat = DeathspankFormatCheck(PreOpenFormatCheck.Skip(0).Take(4).ToArray());
+
+                /*
+                if (IsDeathspankDictFormat == true)
+                {
+                    //store the file as a byte array
+                    OpenFileBytes = File.ReadAllBytes(openFileDialog.FileName);
+                }
+                else
+                {
+                    WrongFileFormat();
+                    return;
+                }
+                */
+
+                //store the full file path of the file
+                CurrentOpenFileFullName = openFileDialog.FileName;
+                //get and store the filename portion of the full file path
+                int index = openFileDialog.FileName.LastIndexOf('\\') + 1;
+                CurrentOpenFileName = openFileDialog.FileName.Substring(index, openFileDialog.FileName.Length - index);
+
+            }
+            Files.Clear();
+            HashLength = 800;
+            await Task.Run(()=> ParseGGArchiveNew());
+
+        }
+
+        private async void OpenFile_Execute_DS2_3()
         {
 
             //create a new open file dialog and filter it to only show datadict files
@@ -811,7 +818,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
             }
             Files.Clear();
-            ParseGGArchiveNew();
+            HashLength = 960;
+            await Task.Run(() => ParseGGArchiveNew());
 
         }
 
@@ -2470,6 +2478,28 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
         static byte[]CompressFile(byte[] data)
         {
+            using (MemoryStream originalStream = new MemoryStream(data))
+            using (MemoryStream compressedStream = new MemoryStream())
+            {
+                var compressor = new ZOutputStream(compressedStream, 9);
+
+                try
+                {
+                    byte[] buffer = data.Length < 4096 ? new byte[data.Length] : new byte[4096];
+                    int read;
+                    while ((read = originalStream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        compressor.Write(buffer, 0, read);
+                    }
+                    compressor.finish();
+                    return compressedStream.ToArray();
+                }
+                finally
+                {
+                    compressor.Dispose();
+                }
+            }
+            /*
             byte[] compressedData;
 
             using (var outputStream = new MemoryStream())
@@ -2491,39 +2521,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 
             }
             return compressedData;
-
-            //var zlibStream = new Ionic.Zlib.ZlibStream(compressedStream, Ionic.Zlib.CompressionMode.Compress, Ionic.Zlib.CompressionLevel.Level9)
-            //return Ionic.Zlib.ZlibStream.CompressBuffer(data);
-            //return Ionic.Zlib.ZlibStream.CompressBuffer(data);
-            //Ionic.Zlib.ZlibStream.
-            /*
-            MemoryStream uncompressed = new MemoryStream(data); //  Here is an example of data in memory; If you need to compress the text, you can use FileStream
-            MemoryStream compressed = new MemoryStream();
-            DeflateStream deflateStream = new DeflateStream(compressed, CompressionLevel.Optimal); //  Note: the first parameter here is where the compressed data should be output
+            */
             
-            uncompressed.CopyTo(deflateStream); //  Use copyto to input the data to be compressed at one time; You can also use write for partial input
-            deflateStream.Close();  //  In close, finish and flush operations will be performed successively.
-            byte[] result = compressed.ToArray();
-            return result;
-            */
-
-            /*
-        var compressionmode = new ICSharpCode.SharpZipLib.Zip.Compression.Deflater();
-        compressionmode.SetLevel(9);
-        MemoryStream compressed = new MemoryStream();
-        DeflaterOutputStream outputStream = new DeflaterOutputStream(compressed, compressionmode);
-        outputStream.Write(data, 0, data.Length);
-        outputStream.Close();
-        return compressed.ToArray();
-        */
-            /*
-            MemoryStream compressed = new MemoryStream();
-            ZOutputStream outputStream = new ZOutputStream(compressed, 9);
-            outputStream.Write(data, 0, data.Length); //  Here, write is used to write the data to be compressed; You can also use the same method as above
-            outputStream.Close();
-            byte[] result = compressed.ToArray();
-            return result;
-            */
         }
         public void PopulateDummyInfo()
         {
@@ -2547,7 +2546,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
         public void ParseGGArchiveNew()
         {
             string filepath = CurrentOpenFileFullName;
-
+           
+            Process_Update("Loading .gg archive data:", "  /  ");
             using (FileStream fs = File.Open(filepath, FileMode.Open, FileAccess.Read, FileShare.Read))
             {
 
@@ -2560,7 +2560,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 //in memory?
 
                 //800 for ds1
-                fs.Seek(800, SeekOrigin.Current);
+                fs.Seek(HashLength, SeekOrigin.Current);
                 //960 for ds2/3
                 //fs.Seek(960, SeekOrigin.Current);
 
@@ -2587,6 +2587,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
                 for (int o =0; o < NumArchiveFiles; o++)
                 {
+                    
                     //crate a new fileinfor object and set the object ID
                     //Id will be used later to read the files in order and get their attributes
                     Models.DS1_FileInfo fileInfo = new Models.DS1_FileInfo()
@@ -2663,11 +2664,21 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                                 break;
                         }
                     }
-
-                    Files.Add(fileInfo);
+                    
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        PercentComplete = ((decimal)o / numarchivefiles) * 100;
+                        ProgressText = $"{o} / {NumArchiveFiles}";
+                        Files.Add(fileInfo);
+                        
+                    });
+                        
+                    
                 }
 
             }
+            
+            Process_Update(string.Empty,string.Empty);
         }
 
         private string ReadNextString(byte[] fileNameBuffer, int i)
@@ -2680,6 +2691,12 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             string Name = System.Text.Encoding.UTF8.GetString(Namebytes);
             
             return Name;
+        }
+        private void Process_Update(string processDesc, string progressTxt)
+        {
+            PercentComplete = 0;
+            OperationText = processDesc; 
+            ProgressText = progressTxt;
         }
 
         private byte[] DSFileNameXor(byte[] obfNameBytes)
@@ -2695,8 +2712,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             return ReturnBytes;
         }
         #endregion
-
-        
+      
         #region Property Changed Method and Event
 
         public event PropertyChangedEventHandler PropertyChanged;
