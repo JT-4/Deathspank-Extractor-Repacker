@@ -1,5 +1,4 @@
-﻿using ICSharpCode.SharpZipLib.Zip.Compression.Streams;
-using Microsoft.Win32;
+﻿using Microsoft.Win32;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -13,7 +12,6 @@ using System.Windows;
 using System.Windows.Forms;
 using System.Windows.Input;
 using System.Windows.Threading;
-using zlib;
 using Application = System.Windows.Application;
 
 namespace Deathspank_Extractor_Repacker.ViewModels
@@ -312,7 +310,6 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             CurrentOpenFileName = fn.Substring(fn.LastIndexOf(@"\") + 1, fn.Length - fn.LastIndexOf(@"\") - 1);
         }
 
-
         private async void Import_Files_Execute()
         {
             
@@ -363,11 +360,11 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 }
                 */
                 //check if the currently archive file is contained this list of files being imported
-                if (importfiles.Any(j => j.FileName == dsfile.FullFilePathName))
+                if (importfiles.Any(j => j.CorrectedRelativePath == dsfile.FullFilePathName))
                 {
                     
                     //get the importing file that matches the current dsfile
-                    var importfilepath = importfiles.Where(k => k.FileName == dsfile.FullFilePathName).FirstOrDefault();
+                    var importfilepath = importfiles.Where(k => k.CorrectedRelativePath == dsfile.FullFilePathName).FirstOrDefault();
 
 
                     //List<byte> encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath));
@@ -379,17 +376,22 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     if (!(dsfile.IsCompressed == 1))
                     {
                         //compress the filestream data for the currently importing file
-                        var compressor = new wrapper.Compression();
-                        encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
+                        //var compressor = new wrapper.Compression();
+                        //var compressor = new DeathspankcZlib.Zlib114();
+
+                            //TODO: this doesn't seem to work for tov 00201
+                        //encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
+                        encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath)).ToArray();
                         compressedbytes = encryptedfilebytes;
                     }
                     else
                     {
                         //compress the filestream data for the currently importing file
                         //compressedbytes = CompressFile(encryptedfilebytes.ToArray());
-                        var compressor = new wrapper.Compression();
+                        //var compressor = new wrapper.Compression();
+                        var compressor = new DeathspankcZlib.Zlib114();
                         encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
-                        compressedbytes = compressor.Compress(encryptedfilebytes.ToArray());
+                        compressedbytes = compressor.Zlib114_Compress(encryptedfilebytes.ToArray());
                     }
                     /*
                     if (compressedbytes.Length != dsfile.CompressedSize)
@@ -642,13 +644,25 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             foreach (string file in foundfiles)
             {
                 string trimmedpath = file.Substring(fbd.SelectedPath.Length + 1, file.Length - fbd.SelectedPath.Length - 1);
+                string correctedpath;
+                if (trimmedpath.ToLower().StartsWith("dlc"))
+                {
+                    correctedpath = trimmedpath.Replace("dlc", 
+                            "c:\\hudson\\jobs\\DeathSpank2_PC_Release\\workspace\\DeathSpank\\ThongsOfVirtue\\DLC\\DLCPack2"
+                        );
+                }
+                else
+                {
+                    correctedpath = trimmedpath;
+                }
 
-                if (Files.Any(f => f.FullFilePathName == trimmedpath))
+                if (Files.Any(f => f.FullFilePathName == correctedpath))
                 {
                     Models.InjectFileData ifile = new Models.InjectFileData()
                     {
-                        FileName = trimmedpath,
-                        FullFilePath = file
+                        RelativePath = trimmedpath,
+                        FullFilePath = file,
+                        CorrectedRelativePath = correctedpath
                     };
                     files.Add(ifile);
                 }
@@ -693,12 +707,27 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
             byte[] decrypted = DecryptFile(decompressed);
 
+            //convert c:\ to c~\ to allow windows file system exports for DS DLC files
+            string path;
+            if (file.WinFilePath.ToLower().StartsWith("c:\\") )
+            {
+                //path = file.WinFilePath.Replace("c:\\","c~\\");
+                path = file.WinFilePath.Replace("c:\\hudson\\jobs\\DeathSpank2_PC_Release\\workspace\\DeathSpank\\ThongsOfVirtue\\DLC\\DLCPack2",
+                                                "dlc");
+            }
+            else
+            {
+                path = file.WinFilePath;
+            }
+
             //must be an error here
             //Make sure the export directory exists
-            Directory.CreateDirectory($@"{ExportFilePath}\{file.WinFilePath}");
+            Directory.CreateDirectory($@"{ExportFilePath}\{path}");
 
             
-            using (FileStream fs = new FileStream($@"{ExportFilePath}\{file.WinFilePath}{file.FileName}", FileMode.OpenOrCreate, FileAccess.ReadWrite)) 
+            using (FileStream fs = new FileStream($@"{ExportFilePath}\{path}{file.FileName}", 
+                                                  FileMode.OpenOrCreate, 
+                                                  FileAccess.ReadWrite)) 
             {
                 BinaryWriter bw = new BinaryWriter(fs);
                 bw.Write(decrypted);
@@ -726,17 +755,16 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     if (ws.Length < compressedSize)
                     {
                         ws.Write(streambuffer, 0, (int)(compressedSize - ws.Length));
-                        if (iscompressed == 1)
-                        {
-                            return DecompressFile(ws.ToArray());
-                        }
-                        else
-                        {
-                            return ws.ToArray();
-                        }
 
                     }
-
+                    if (iscompressed == 1)
+                    {
+                        return DecompressFile(ws.ToArray());
+                    }
+                    else
+                    {
+                        return ws.ToArray();
+                    }
                 }
 
             }
@@ -776,6 +804,10 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 int index = openFileDialog.FileName.LastIndexOf('\\') + 1;
                 CurrentOpenFileName = openFileDialog.FileName.Substring(index, openFileDialog.FileName.Length - index);
 
+            }
+            else
+            {
+                return;
             }
             Files.Clear();
             HashLength = 800;
@@ -817,6 +849,10 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 CurrentOpenFileName = openFileDialog.FileName.Substring(index, openFileDialog.FileName.Length - index);
 
             }
+            else
+            {
+                return;
+            }
             Files.Clear();
             HashLength = 960;
             await Task.Run(() => ParseGGArchiveNew());
@@ -834,6 +870,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             TasksCompleted = 0;
 
             var fbd = new FolderBrowserDialog();
+
             if (fbd.ShowDialog() == DialogResult.OK)
             {
                 //set the global export folder
@@ -2475,7 +2512,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             return decompressed;
             */
         }
-
+        /*
         static byte[]CompressFile(byte[] data)
         {
             using (MemoryStream originalStream = new MemoryStream(data))
@@ -2499,31 +2536,10 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     compressor.Dispose();
                 }
             }
-            /*
-            byte[] compressedData;
-
-            using (var outputStream = new MemoryStream())
-            {
-                
-                // Use the ZlibStream class to compress the data
-                using (var zlibStream = new DeflateStream(outputStream, CompressionLevel.Optimal))
-                {
-                    
-                    // Write the input data to the compression stream
-                    zlibStream.Write(data, 0, data.Length);
-                    
-                }
-
-                // The compressed data is now stored in the outputStream object
-                // You can use the outputStream.ToArray() method to get a byte array
-                // containing the compressed data, including the zlib header and checksum
-                compressedData = outputStream.ToArray();
-                
-            }
-            return compressedData;
-            */
+          
             
         }
+        */
         public void PopulateDummyInfo()
         {
             Models.DS1_FileInfo DemoFileInfo = new Models.DS1_FileInfo();

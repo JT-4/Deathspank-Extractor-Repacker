@@ -8,7 +8,8 @@ namespace Deathspank_Extractor_Repacker.Models
 {
     internal class InjectFileData
     {
-        public string FileName { get; set; }
+        public string RelativePath { get; set; }
         public string FullFilePath { get; set; }
+        public string CorrectedRelativePath { get; set;}
     }
 }
