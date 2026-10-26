@@ -334,6 +334,13 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             {
                     return;
             }
+
+            //cleanup the filestream temporary file
+            if (File.Exists(@"C:\programdata\DSExtRepkr\Streams.file"))
+            {
+                File.Delete(@"C:\programdata\DSExtRepkr\Streams.file");
+            }
+
             await Task.Run(() => {
                 //set the directory where the repack files are located
                 ArchiveExportPath = exportfbd.SelectedPath;
@@ -533,10 +540,10 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             PercentComplete = 0;
             });
 
-            byte[] validationblock = new byte[8000];
+            byte[] validationblock = new byte[32768];
             using (FileStream sr = new FileStream($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", FileMode.Open, FileAccess.Read))
             {
-                sr.Read(validationblock, 0, 8000);
+                sr.Read(validationblock, 0, 32768);
             }
             //reseal the archive with new validation blocks for DS1 or 2/3
             if (HashLength == 800)
