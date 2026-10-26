@@ -55,6 +55,8 @@ namespace Deathspank_Extractor_Repacker.ViewModels
         /// </summary>
         public int HashLength { get; set; }
 
+        public DeathSpankGgObfuscation.Tables Obf_Tables { get; set; }
+
         /// <summary>
         /// Save a string representing the full filepath of the currently opened
         /// Datadict file. Implement notify on property changed.
@@ -71,6 +73,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                 {
                     currentopenfilefullname = value;
                     SetOpenFileName(value);
+                    Obf_Tables = DeathSpankGgObfuscation.BuildTables(CurrentOpenFileName);
                     OnPropertyChanged("CurrentOpenFileName");
                     OnPropertyChanged("CurrentOpenFileFullName");
 
@@ -273,6 +276,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             Files = new ObservableCollection<Models.DS1_FileInfo>();
             SelectedFiles = new ObservableCollection<Models.DS1_FileInfo>();
             HeaderBytes = new byte[16];
+            
 
          
         }
@@ -381,17 +385,28 @@ namespace Deathspank_Extractor_Repacker.ViewModels
 
                             //TODO: this doesn't seem to work for tov 00201
                         //encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
-                        encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath)).ToArray();
+                        //encryptedfilebytes = EncryptBytes(File.ReadAllBytes(importfilepath.FullFilePath)).ToArray();
+
+                        //new encryption method using obfuscation tables
+
+                        encryptedfilebytes = File.ReadAllBytes(importfilepath.FullFilePath);
+                        DeathSpankGgObfuscation.ObfuscateInPlace(encryptedfilebytes,
+                            Obf_Tables.Encode);
                         compressedbytes = encryptedfilebytes;
-                    }
+
+
+                        }
                     else
                     {
                         //compress the filestream data for the currently importing file
                         //compressedbytes = CompressFile(encryptedfilebytes.ToArray());
                         //var compressor = new wrapper.Compression();
                         var compressor = new DeathspankcZlib.Zlib114();
-                        encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
-                        compressedbytes = compressor.Zlib114_Compress(encryptedfilebytes.ToArray());
+                            //encryptedfilebytes = compressor.Switch(File.ReadAllBytes(importfilepath.FullFilePath));
+                            encryptedfilebytes = File.ReadAllBytes(importfilepath.FullFilePath);
+                            DeathSpankGgObfuscation.ObfuscateInPlace(encryptedfilebytes,
+                                Obf_Tables.Encode);
+                            compressedbytes = compressor.Zlib114_Compress(encryptedfilebytes.ToArray());
                     }
                     /*
                     if (compressedbytes.Length != dsfile.CompressedSize)
@@ -400,7 +415,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                     }
                     */
                         //get the number of zeros needed to be placed onto the end of the file stream. 
-                        //All streams should appear in blocks of 64 bytes.
+                        //All streams should appear in blocks of 16 bytes.
                         int paddingzeros = GetZerosPaddingStream(compressedbytes.Length);
                         
                         //add the compressedbytes to a new list so it can easily be padded with zeros at the end
@@ -517,6 +532,36 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             }
             PercentComplete = 0;
             });
+
+            byte[] validationblock = new byte[8000];
+            using (FileStream sr = new FileStream($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", FileMode.Open, FileAccess.Read))
+            {
+                sr.Read(validationblock, 0, 8000);
+            }
+            //reseal the archive with new validation blocks for DS1 or 2/3
+            if (HashLength == 800)
+            {
+                
+                    GG_1_resealer.Reseal(validationblock,CurrentOpenFileName);
+                    byte[] val_writebytes = validationblock.Skip(16).Take(800).ToArray();
+                //write the resealed validation block to the new archive file
+                using (FileStream sw = new FileStream($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", FileMode.Open, FileAccess.ReadWrite))
+                {
+                    sw.Position = 16;
+                    sw.Write(val_writebytes, 0, 800);
+                }
+            }
+            else
+            {
+                GG_2_3_resealer.Reseal(validationblock, CurrentOpenFileName);
+                byte[] val_writebytes = validationblock.Skip(16).Take(960).ToArray();
+                //write the resealed validation block to the new archive file
+                using (FileStream sw = new FileStream($"{ArchiveExportPath}\\{CurrentOpenFileName.Substring(0, CurrentOpenFileName.Length - 3)}-New.gg", FileMode.Open, FileAccess.ReadWrite))
+                {
+                    sw.Position = 16;
+                    sw.Write(val_writebytes, 0, 960);
+                }
+            }
 
         }
 
@@ -645,10 +690,15 @@ namespace Deathspank_Extractor_Repacker.ViewModels
             {
                 string trimmedpath = file.Substring(fbd.SelectedPath.Length + 1, file.Length - fbd.SelectedPath.Length - 1);
                 string correctedpath;
-                if (trimmedpath.ToLower().StartsWith("dlc"))
+                if (trimmedpath.ToLower().StartsWith("thongs_dlc"))
                 {
-                    correctedpath = trimmedpath.Replace("dlc", 
+                    correctedpath = trimmedpath.Replace("thongs_dlc", 
                             "c:\\hudson\\jobs\\DeathSpank2_PC_Release\\workspace\\DeathSpank\\ThongsOfVirtue\\DLC\\DLCPack2"
+                        );
+                }
+                else if(trimmedpath.ToLower().StartsWith("bacon_dlc")){
+                    correctedpath = trimmedpath.Replace("bacon_dlc",
+                            "C:\\hudson-deathspank3\\hudson_home\\jobs\\deathspank3-pc\\workspace\\FiresOfBacon\\DLC\\DLCPack2"
                         );
                 }
                 else
@@ -704,16 +754,24 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                                                                 file.FileOffset, 
                                                                 file.IsCompressed, 
                                                                 4096);
+            //old decryption method 
+            //byte[] decrypted = DecryptFile(decompressed);
+            
+            // Use the obfuscation tables to deobfuscate the decrypted data
+            DeathSpankGgObfuscation.DeobfuscateInPlace(decompressed, Obf_Tables.Decode);
 
-            byte[] decrypted = DecryptFile(decompressed);
-
-            //convert c:\ to c~\ to allow windows file system exports for DS DLC files
+            
             string path;
-            if (file.WinFilePath.ToLower().StartsWith("c:\\") )
+            if (file.WinFilePath.ToLower().StartsWith("c:\\hudson\\jobs") )
             {
                 //path = file.WinFilePath.Replace("c:\\","c~\\");
                 path = file.WinFilePath.Replace("c:\\hudson\\jobs\\DeathSpank2_PC_Release\\workspace\\DeathSpank\\ThongsOfVirtue\\DLC\\DLCPack2",
-                                                "dlc");
+                                                "thongs_dlc");
+                
+            }
+            else if(file.WinFilePath.ToLower().StartsWith("c:\\hudson-deathspank3")){
+                path = file.WinFilePath.Replace("C:\\hudson-deathspank3\\hudson_home\\jobs\\deathspank3-pc\\workspace\\FiresOfBacon\\DLC\\DLCPack2",
+                                                "bacon_dlc");
             }
             else
             {
@@ -730,7 +788,7 @@ namespace Deathspank_Extractor_Repacker.ViewModels
                                                   FileAccess.ReadWrite)) 
             {
                 BinaryWriter bw = new BinaryWriter(fs);
-                bw.Write(decrypted);
+                bw.Write(decompressed);
                 bw.Flush();
                 bw.Close();
 

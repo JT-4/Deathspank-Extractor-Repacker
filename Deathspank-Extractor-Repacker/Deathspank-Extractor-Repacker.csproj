@@ -61,6 +61,9 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Compile Include="HelperClasses\DeathSpankGgObfuscation.cs" />
+    <Compile Include="HelperClasses\GG_1_resealer.cs" />
+    <Compile Include="HelperClasses\GG_2_3_resealer.cs" />
     <Compile Include="HelperClasses\RelayCommand.cs" />
     <Compile Include="Models\InjectFileData.cs" />
     <Compile Include="ViewModels\MainWindow_ViewModel.cs" />
@@ -104,6 +107,8 @@
   <ItemGroup>
     <None Include="App.config" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <Content Include="Deathspank_cZlib.dll" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
